@@ -1,0 +1,87 @@
+---
+title: "Data Cleaning and EDA"
+author: 'Xiaojing Dong UNI: xd2195'
+date: "11/4/2018"
+output: pdf_document
+---
+
+```{r eval=FALSE}
+library(data.table)
+dt <- fread("train.csv")
+
+# Use ip, device and os to uniquely identify a user
+user <- paste(dt$ip, dt$device, dt$os, sep = "-")
+user_unique <- unique(user)
+
+# Randomly sample 20,000 users
+set.seed(0)
+user_sample <- sample(1:length(user_unique), 20000)
+user_sample <- user_unique[user_sample]
+ind_sample <- user %in% user_sample
+
+# Obtain the new training data of 1,108,617 rows
+dat <- dt[ind_sample,]
+save(dat, file = "train.RData")
+```
+
+```{r warning=FALSE, message=FALSE}
+load(file = "train.RData")
+
+# To identify users only, may not be useful for modelling
+dat$user <- paste(dat$ip, dat$device, dat$os, sep = "-")
+
+# Convert app, device, os and channel to categorical variables
+dat$app <- as.factor(dat$app) # 274 levels
+dat$device <- as.factor(dat$device) # 361 levels
+dat$os <- as.factor(dat$os) # 180 levels
+dat$channel <- as.factor(dat$channel) # 171 levels
+
+# Extract hour and day from click_time
+dat$hour <- hour(dat$click_time)
+dat$day <- mday(dat$click_time)
+save(dat, file = "train_processed.RData")
+```
+
+```{r}
+load(file = "train_processed.RData")
+dat$attributed_time <- NULL
+
+# Number of unique user, device, os, app, channel by ip
+dat <- dat
+dat[, nunique.user.by.ip := uniqueN(user), by = ip]
+dat[, nunique.device.by.ip := uniqueN(device), by = ip]
+dat[, nunique.os.by.ip := uniqueN(os), by = ip]
+dat[, nunique.app.by.ip := uniqueN(app), by = ip]
+dat[, nunique.channel.by.ip := uniqueN(channel), by = ip]
+
+# Order of clicks by user, ip, user & app, ip & app, ip & day & hour
+dat[, click.order.by.user := order(click_time, is_attributed), by = user]
+dat[, click.order.by.ip := order(click_time, is_attributed), by = ip]
+dat[, click.order.by.user.app := order(click_time, is_attributed), by = list(user, app)]
+dat[, click.order.by.ip.app := order(click_time, is_attributed), by = list(ip, app)]
+dat[, click.order.by.ip.day.hour := order(click_time, is_attributed), by = list(ip, day, hour)]
+
+# Order of clicks made in one second by user & app
+dat[, click.in.second.by.user.app := order(is_attributed), by = list(user, app, click_time)]
+
+# Previous number of attributes by ip, user, app, channel, app & channel
+dat[order(click_time, is_attributed)]
+dat[, previous.attribute.by.ip := cumsum(is_attributed) - is_attributed, by = ip]
+dat[, previous.attribute.by.user := cumsum(is_attributed) - is_attributed, by = user]
+dat[, previous.attribute.by.app := cumsum(is_attributed) - is_attributed, by = app]
+dat[, previous.attribute.by.channel := cumsum(is_attributed) - is_attributed, by = channel]
+dat[, previous.attribute.by.app.channel := cumsum(is_attributed) - is_attributed, by = list(app, channel)]
+
+# Time difference (in seconds) b/w the previous and current click_time by user & day, user & app & day
+dat[, time.delta.1.by.user.day := c(NA, click_time[-.N]), by = list(user, day)]
+dat$time.delta.1.by.user.day <- as.numeric(
+  difftime(dat$click_time, dat$time.delta.1.by.user.day, units = 'secs'))
+
+dat[, time.delta.1.by.user.app.day := c(NA, click_time[-.N]), by = list(user, app, day)]
+dat$time.delta.1.by.user.app.day <- as.numeric(
+  difftime(dat$click_time, dat$time.delta.1.by.user.app.day, units = 'secs'))
+
+save(dat, file = "train_cleaned.RData")
+```
+
+
